@@ -1,0 +1,5 @@
+{"question": "How do I roll back a bad deployment?", "expected_source": "runbook-deployments.md", "expected_keywords": ["argo", "revert", "git"]}
+{"question": "What should I check first when a pod is in CrashLoopBackOff?", "expected_source": "runbook-kubernetes.md", "expected_keywords": ["logs", "previous", "describe"]}
+{"question": "Which data may never be sent to external LLM providers?", "expected_source": "ai-usage-policy.md", "expected_keywords": ["patient", "images", "secrets"]}
+{"question": "Who approves production changes?", "expected_source": "runbook-deployments.md", "expected_keywords": ["change", "approval"]}
+{"question": "Which model should I use for internal code questions?", "expected_source": "ai-usage-policy.md", "expected_keywords": ["local-chat"]}

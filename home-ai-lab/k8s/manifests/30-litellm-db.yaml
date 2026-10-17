@@ -1,0 +1,61 @@
+# Postgres for LiteLLM (virtual keys, budgets, spend logs).
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm-db
+  namespace: ai-lab
+spec:
+  clusterIP: None                  # headless service for the StatefulSet
+  selector: {app: litellm-db}
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: litellm-db
+  namespace: ai-lab
+spec:
+  serviceName: litellm-db
+  replicas: 1
+  selector:
+    matchLabels: {app: litellm-db}
+  template:
+    metadata:
+      labels: {app: litellm-db}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: litellm
+            - name: POSTGRES_DB
+              value: litellm
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: lab-secrets, key: LITELLM_DB_PASSWORD}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "litellm"]
+            periodSeconds: 10
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 5Gi

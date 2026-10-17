@@ -1,0 +1,62 @@
+# Windows PC (RTX 4070 Super, 12 GB VRAM) – runs vLLM in Docker Desktop (WSL2 backend).
+# Langfuse also runs on this PC from its own official compose (see README, step 2).
+#
+#   copy .env.example .env      # edit values
+#   docker compose up -d                     # vLLM
+#   docker compose --profile ollama up -d    # Ollama-GPU instead of vLLM (stop vLLM first: they share the GPU)
+
+services:
+  vllm:
+    image: vllm/vllm-openai:${VLLM_TAG:-latest}   # pin a version once it works (e.g. v0.x.y)
+    container_name: vllm
+    restart: unless-stopped
+    ipc: host                                     # vLLM needs shared memory
+    ports:
+      - "8000:8000"                               # reachable from the Pi at http://PC_IP:8000
+    environment:
+      - HF_TOKEN=${HF_TOKEN:-}
+    volumes:
+      - hf-cache:/root/.cache/huggingface         # model weights survive container restarts
+    command:
+      - --model=${MODEL:-Qwen/Qwen2.5-7B-Instruct-AWQ}
+      - --served-model-name=${SERVED_NAME:-qwen2.5-7b}
+      - --max-model-len=${MAX_MODEL_LEN:-8192}
+      - --gpu-memory-utilization=${GPU_UTIL:-0.80}  # Windows desktop also uses VRAM
+      - --enable-prefix-caching                   # reuse KV-cache for shared prompt prefixes
+      - --enable-auto-tool-choice                 # tool/function calling for agents later
+      - --tool-call-parser=hermes                 # parser that matches Qwen2.5
+      - --api-key=${VLLM_API_KEY}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 20
+      start_period: 300s                          # first start downloads ~5 GB of weights
+
+  ollama:
+    profiles: ["ollama"]
+    image: ollama/ollama:latest
+    container_name: ollama-gpu
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  hf-cache:
+  ollama:

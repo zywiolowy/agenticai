@@ -1,0 +1,73 @@
+# Open WebUI – chat UI that talks only to the LiteLLM gateway.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: open-webui-data
+  namespace: ai-lab
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: open-webui
+  namespace: ai-lab
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {app: open-webui}
+  template:
+    metadata:
+      labels: {app: open-webui}
+    spec:
+      containers:
+        - name: open-webui
+          image: ghcr.io/open-webui/open-webui:main
+          ports:
+            - containerPort: 8080
+          env:
+            - name: OPENAI_API_BASE_URL
+              value: "http://litellm:4000/v1"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef: {name: lab-secrets, key: LITELLM_MASTER_KEY}
+            - name: WEBUI_SECRET_KEY
+              valueFrom:
+                secretKeyRef: {name: lab-secrets, key: WEBUI_SECRET_KEY}
+            - name: ENABLE_OLLAMA_API
+              value: "false"
+          volumeMounts:
+            - name: data
+              mountPath: /app/backend/data
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 3Gi}
+          startupProbe:
+            httpGet: {path: /health, port: 8080}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+            periodSeconds: 15
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: open-webui-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: open-webui
+  namespace: ai-lab
+spec:
+  selector: {app: open-webui}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

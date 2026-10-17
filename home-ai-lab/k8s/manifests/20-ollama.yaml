@@ -1,0 +1,81 @@
+# Ollama on the Pi CPU – only for EMBEDDINGS (nomic-embed-text, 768 dims). Chat runs on vLLM.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-data
+  namespace: ai-lab
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: ai-lab
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate                 # RWO volume: don't run old + new pod at the same time
+  selector:
+    matchLabels: {app: ollama}
+  template:
+    metadata:
+      labels: {app: ollama}
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          ports:
+            - containerPort: 11434
+          env:
+            - name: OLLAMA_KEEP_ALIVE
+              value: "24h"         # keep the embedding model loaded
+          volumeMounts:
+            - name: data
+              mountPath: /root/.ollama
+          resources:
+            requests: {cpu: 500m, memory: 1Gi}
+            limits: {memory: 4Gi}
+          readinessProbe:
+            httpGet: {path: /api/tags, port: 11434}
+            periodSeconds: 10
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: ollama-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: ai-lab
+spec:
+  selector: {app: ollama}
+  ports:
+    - name: http
+      port: 11434
+      targetPort: 11434
+---
+# One-off Job: pulls the embedding model into the Ollama server above.
+# Retries until Ollama is ready. Re-run: kubectl -n ai-lab delete job ollama-pull && bash install.sh
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ollama-pull
+  namespace: ai-lab
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: pull
+          image: ollama/ollama:latest
+          env:
+            - name: OLLAMA_HOST
+              value: "http://ollama:11434"
+          command: ["ollama", "pull", "nomic-embed-text"]

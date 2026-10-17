@@ -1,0 +1,115 @@
+# LiteLLM gateway: one OpenAI-compatible endpoint in front of every model.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: litellm-config
+  namespace: ai-lab
+data:
+  config.yaml: |
+    model_list:
+      # Chat model on the PC GPU (vLLM) – reached through the "vllm" external Service
+      - model_name: local-chat
+        litellm_params:
+          model: hosted_vllm/qwen2.5-7b          # "hosted_vllm/<served-model-name>"
+          api_base: http://vllm:8000/v1
+          api_key: os.environ/VLLM_API_KEY
+          timeout: 120
+
+      # Embeddings on the Pi CPU (Ollama) – 768 dimensions
+      - model_name: embed
+        litellm_params:
+          model: ollama/nomic-embed-text
+          api_base: http://ollama:11434
+
+      # Optional cloud models – uncomment, set the key in lab.env, re-run install.sh.
+      # Check the provider docs for the current model ID.
+      # - model_name: cloud-chat
+      #   litellm_params:
+      #     model: anthropic/<current-claude-model-id>
+      #     api_key: os.environ/ANTHROPIC_API_KEY
+      # - model_name: cloud-chat
+      #   litellm_params:
+      #     model: gemini/<current-gemini-model-id>
+      #     api_key: os.environ/GEMINI_API_KEY
+
+    router_settings:
+      num_retries: 2
+      # When the PC is off / vLLM is down, fall back to the cloud model:
+      # fallbacks: [{"local-chat": ["cloud-chat"]}]
+
+    litellm_settings:
+      drop_params: true
+      # Gateway-level tracing to Langfuse (all traffic, incl. Open WebUI chats).
+      # The RAG scripts also trace themselves; enabling both gives two traces per call,
+      # so ideally point the gateway at a separate Langfuse project.
+      # success_callback: ["langfuse"]
+      # failure_callback: ["langfuse"]
+
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+      database_url: os.environ/DATABASE_URL
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: litellm
+  namespace: ai-lab
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: litellm}
+  template:
+    metadata:
+      labels: {app: litellm}
+      annotations:
+        # install.sh puts the config hash here, so a config change restarts the pod
+        checksum/config: "${LITELLM_CONFIG_HASH}"
+    spec:
+      containers:
+        - name: litellm
+          # GHCR image is multi-arch (arm64). Pin a version tag once it works.
+          image: ghcr.io/berriai/litellm:main-stable
+          args: ["--config", "/app/config.yaml", "--port", "4000"]
+          ports:
+            - containerPort: 4000
+          env:
+            - name: STORE_MODEL_IN_DB
+              value: "True"
+            - name: LANGFUSE_HOST
+              value: "http://langfuse:3000"
+          envFrom:
+            - secretRef:
+                name: lab-secrets          # LITELLM_MASTER_KEY, DATABASE_URL, VLLM_API_KEY, LANGFUSE_*, ...
+          volumeMounts:
+            - name: config
+              mountPath: /app/config.yaml
+              subPath: config.yaml
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 2Gi}
+          startupProbe:                    # first start runs DB migrations – can take minutes on a Pi
+            httpGet: {path: /health/liveliness, port: 4000}
+            periodSeconds: 10
+            failureThreshold: 60
+          readinessProbe:
+            httpGet: {path: /health/readiness, port: 4000}
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: {path: /health/liveliness, port: 4000}
+            periodSeconds: 30
+      volumes:
+        - name: config
+          configMap:
+            name: litellm-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: litellm
+  namespace: ai-lab
+spec:
+  selector: {app: litellm}
+  ports:
+    - name: http
+      port: 4000
+      targetPort: 4000

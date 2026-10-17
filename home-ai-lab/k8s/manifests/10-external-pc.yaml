@@ -1,0 +1,59 @@
+# Services that point OUTSIDE the cluster, to the Windows PC.
+# A Service without a selector + a manual EndpointSlice = pods can call
+#   http://vllm:8000        (vLLM on the PC GPU)
+#   http://langfuse:3000    (Langfuse on the PC)
+# exactly as if they were running inside the cluster.
+# ${PC_IP} is filled in by install.sh.
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm
+  namespace: ai-lab
+spec:
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: vllm-pc
+  namespace: ai-lab
+  labels:
+    kubernetes.io/service-name: vllm     # links this slice to the Service above
+addressType: IPv4
+ports:
+  - name: http
+    port: 8000
+    protocol: TCP
+endpoints:
+  - addresses: ["${PC_IP}"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse
+  namespace: ai-lab
+spec:
+  ports:
+    - name: http
+      port: 3000
+      targetPort: 3000
+      protocol: TCP
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: langfuse-pc
+  namespace: ai-lab
+  labels:
+    kubernetes.io/service-name: langfuse
+addressType: IPv4
+ports:
+  - name: http
+    port: 3000
+    protocol: TCP
+endpoints:
+  - addresses: ["${PC_IP}"]

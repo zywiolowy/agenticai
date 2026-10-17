@@ -1,0 +1,63 @@
+# Helm values for kube-prometheus-stack, tuned for a single Pi running k3s.
+# ${PC_IP}, ${PI_IP} and ${GRAFANA_PASSWORD} are filled in by install.sh.
+fullnameOverride: kps
+
+alertmanager:
+  enabled: false          # not needed for the lab
+
+# k3s runs these components inside one process; the default scrapers would just show errors
+kubeEtcd: {enabled: false}
+kubeControllerManager: {enabled: false}
+kubeScheduler: {enabled: false}
+kubeProxy: {enabled: false}
+
+prometheus:
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts: ["prometheus.${PI_IP}.nip.io"]
+    paths: ["/"]
+  prometheusSpec:
+    retention: 7d
+    resources:
+      requests: {cpu: 200m, memory: 512Mi}
+      limits: {memory: 2Gi}
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: local-path
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 10Gi
+    additionalScrapeConfigs:
+      # vLLM on the Windows PC: tokens/s, running/waiting requests, KV-cache usage, TTFT
+      - job_name: vllm
+        static_configs:
+          - targets: ["${PC_IP}:8000"]
+      # Qdrant inside the cluster
+      - job_name: qdrant
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["qdrant.ai-lab.svc.cluster.local:6333"]
+
+grafana:
+  fullnameOverride: grafana
+  adminPassword: "${GRAFANA_PASSWORD}"
+  ingress:
+    enabled: true
+    ingressClassName: traefik
+    hosts: ["grafana.${PI_IP}.nip.io"]
+    path: /
+  persistence:
+    enabled: true
+    storageClassName: local-path
+    size: 2Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+
+prometheusOperator:
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {memory: 512Mi}
